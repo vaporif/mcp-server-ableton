@@ -1,0 +1,31 @@
+[package]
+name = "mcp-server-ableton"
+version = "0.1.0"
+edition = "2024"
+description = "MCP server for Ableton Live"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/vaporif/mcp-server-ableton"
+readme = "README.md"
+keywords = ["mcp", "ableton", "music", "ai"]
+categories = ["command-line-utilities"]
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+multiple_crate_versions = "allow"
+
+[dependencies]
+rmcp = { version = "1.1", features = ["server", "transport-io", "transport-streamable-http-server"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+thiserror = "2"
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+axum = "0.8"
+tokio-util = "0.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
