@@ -10,7 +10,7 @@ Claude/Client <-> MCP Server (Rust, stdio/HTTP) <-> OSC over UDP <-> AbletonOSC 
 
 ## Prerequisites
 
-- AbletonOSC Max for Live device installed and loaded in the user's Ableton session
+- AbletonOSC Max for Live device installed and loaded in the user's Ableton session (auto-installed via `mcp-server-ableton install`)
 - AbletonOSC listens on UDP 11000 (receive) and replies on UDP 11001 (send)
 - Max for Live requires Ableton Suite or the Max for Live add-on
 
@@ -213,15 +213,47 @@ Supersedes template tracks for device creation. The LLM could say "add a Wavetab
 
 Not in scope for implementation. Documented here for future planning.
 
+## AbletonOSC Installer (`installer.rs`)
+
+### Bundling
+
+AbletonOSC is included as a git submodule pinned to a specific commit of `ideoforms/AbletonOSC` (MIT licensed — no conflict with GPL-3.0). This ensures the MCP server ships with a known-good version and users don't need to manually download anything.
+
+### CLI Subcommand
+
+`mcp-server-ableton install` — copies the bundled AbletonOSC files to the correct Ableton User Library path.
+
+**Installation paths:**
+- macOS: `~/Music/Ableton/User Library/Presets/MIDI Effects/Max MIDI Effect/`
+- Windows: `%APPDATA%\Ableton\User Library\Presets\MIDI Effects\Max MIDI Effect\`
+
+**Behavior:**
+- Detects OS and resolves the correct target path
+- Checks if AbletonOSC is already installed at the target (compare file contents or version marker)
+- If not installed: copies the bundled AbletonOSC device files to the target directory
+- If already installed: reports "already installed" and skips (or `--force` to overwrite)
+- Prints clear instructions after install: "Open Ableton Live, drag AbletonOSC from your User Library into any track, and you're ready to go"
+- Errors clearly if the Ableton User Library path doesn't exist (Ableton may not be installed)
+
+**Implementation:**
+- New `installer.rs` module with `install()` function
+- `config.rs` gains an `Install` variant in the CLI subcommand enum (via clap)
+- `main.rs` dispatches to `installer::install()` before starting the MCP server if the `install` subcommand is used
+- Uses `include_dir` or `rust-embed` to bundle the submodule files into the binary at compile time, OR reads from a known path relative to the binary. Compile-time embedding is preferred — single binary, no external files needed at runtime.
+
+**No runtime dependency:** The installer is a one-time setup step. The MCP server itself only needs AbletonOSC to be loaded in Ableton — it doesn't care how it got there.
+
 ## Project Structure
 
 ```
+├── AbletonOSC/              # git submodule (ideoforms/AbletonOSC, MIT)
 src/
-├── main.rs              # MCP stdio/HTTP server startup (existing)
+├── main.rs              # MCP stdio/HTTP server startup + install dispatch (existing, extend)
 ├── lib.rs               # Module exports (existing)
 ├── server.rs            # AbletonMcpServer + Arc<OscClient> + tool router (existing, extend)
-├── config.rs            # CLI args (existing, no changes)
-├── errors.rs            # Error types (existing, add OSC variants)
+├── config.rs            # CLI args + Install subcommand (existing, extend)
+├── errors.rs            # Error types (existing, add OSC + installer variants)
+├── installer.rs         # AbletonOSC auto-installer (new)
 ├── osc.rs               # OscClient with dispatcher (new)
 ├── tools.rs             # Module root for tools/ (new)
 └── tools/
@@ -238,20 +270,24 @@ Module structure uses modern Rust syntax: `src/tools.rs` as the module root with
 
 ## Dependencies
 
-**New:** `rosc` — OSC encoding/decoding. Only new crate addition.
+**New:**
+- `rosc` — OSC encoding/decoding
+- `include_dir` (or `rust-embed`) — embed AbletonOSC files into the binary at compile time
+- `dirs` — resolve platform-specific user library paths (macOS/Windows)
 
 **Existing (already in Cargo.toml):** `rmcp`, `tokio`, `serde_json`, `thiserror`, `anyhow`, `tracing`, `axum`, `clap`, `schemars`.
 
 ## Build Order
 
-1. `osc.rs` — OscClient with dispatcher, send/query methods, query mutex, CancellationToken shutdown
-2. `errors.rs` — add OSC error variants
-3. Transport tools (play, stop, tempo) — first end-to-end test with Ableton
-4. Track + scene tools (including `set_track_name`)
-5. Clip tools (including MIDI note operations with 5-field format)
-6. Device tools
-7. Compound read tools (session state, track detail, device full)
-8. Compound write tools (create_midi_clip_with_notes, set_device_parameters, set_mixer)
-9. Template tracks
-10. Batch tool
-11. Phase 2: create_musical_phrase, adjust_clip_sound
+1. AbletonOSC git submodule + `installer.rs` + `install` CLI subcommand — get AbletonOSC auto-install working first
+2. `osc.rs` — OscClient with dispatcher, send/query methods, query mutex, CancellationToken shutdown
+3. `errors.rs` — add OSC error variants
+4. Transport tools (play, stop, tempo) — first end-to-end test with Ableton
+5. Track + scene tools (including `set_track_name`)
+6. Clip tools (including MIDI note operations with 5-field format)
+7. Device tools
+8. Compound read tools (session state, track detail, device full)
+9. Compound write tools (create_midi_clip_with_notes, set_device_parameters, set_mixer)
+10. Template tracks
+11. Batch tool
+12. Phase 2: create_musical_phrase, adjust_clip_sound
