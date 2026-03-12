@@ -29,7 +29,7 @@ include_dir = "0.7"
 dirs = "6"
 ```
 
-Add to `tokio` features: `"net"` (for UDP sockets).
+Add to `tokio` features: `"net"` (for UDP sockets) and `"time"` (for `tokio::time::timeout`).
 
 - [ ] **Step 2: Verify it compiles**
 
@@ -155,9 +155,10 @@ use include_dir::{Dir, include_dir};
 
 use crate::errors::Error;
 
-// Embed the AbletonOSC directory at compile time.
-// This path is relative to the crate root (where Cargo.toml lives).
-static ABLETON_OSC_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/AbletonOSC");
+// Embed only the Max for Live device files, not the entire repo
+// (excludes .git, README, examples, tests, etc.)
+// Adjust the subdirectory path based on AbletonOSC's actual structure.
+static ABLETON_OSC_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/AbletonOSC/AbletonOSC");
 
 /// Returns the platform-specific Ableton User Library path for Max MIDI Effects.
 fn ableton_midi_effects_path() -> Result<PathBuf, Error> {
@@ -404,6 +405,17 @@ impl FromOsc for String {
     }
 }
 
+impl FromOsc for f32 {
+    fn from_osc(args: &[OscType]) -> Result<Self, Error> {
+        for arg in args.iter().rev() {
+            if let OscType::Float(f) = arg {
+                return Ok(*f);
+            }
+        }
+        Err(Error::UnexpectedResponse("expected f32 in OSC args".into()))
+    }
+}
+
 impl FromOsc for bool {
     fn from_osc(args: &[OscType]) -> Result<Self, Error> {
         for arg in args.iter().rev() {
@@ -415,6 +427,24 @@ impl FromOsc for bool {
         }
         Err(Error::UnexpectedResponse("expected bool in OSC args".into()))
     }
+}
+
+/// Extract all strings from args, skipping `skip` leading args (index prefix).
+/// Used for bulk responses like `/live/track/get/devices/name [track]`
+/// which returns `[track_idx, "name1", "name2", ...]`.
+pub fn extract_strings(args: &[OscType], skip: usize) -> Vec<String> {
+    args.iter()
+        .skip(skip)
+        .filter_map(|a| if let OscType::String(s) = a { Some(s.clone()) } else { None })
+        .collect()
+}
+
+/// Extract all floats from args, skipping `skip` leading args.
+pub fn extract_floats(args: &[OscType], skip: usize) -> Vec<f32> {
+    args.iter()
+        .skip(skip)
+        .filter_map(|a| if let OscType::Float(f) = a { Some(*f) } else { None })
+        .collect()
 }
 
 pub struct OscClient {
@@ -438,7 +468,6 @@ impl OscClient {
         });
 
         let client_clone = Arc::clone(&client);
-        let recv_pending = Arc::clone(&pending);
         tokio::spawn(async move {
             let mut buf = vec![0u8; RECV_BUF_SIZE];
             loop {
@@ -450,7 +479,7 @@ impl OscClient {
                     result = client_clone.socket.recv_from(&mut buf) => {
                         match result {
                             Ok((size, _addr)) => {
-                                Self::handle_packet(&buf[..size], &recv_pending).await;
+                                Self::handle_packet(&buf[..size], &client_clone.pending).await;
                             }
                             Err(e) => {
                                 tracing::warn!("OSC recv error: {e}");
@@ -596,6 +625,11 @@ impl AbletonMcpServer {
         self.osc_cell
             .get_or_try_init(|| OscClient::new(self.cancel.child_token()))
             .await
+    }
+
+    /// Convenience: get OscClient with McpError conversion for use in tool handlers.
+    pub async fn osc_mcp(&self) -> Result<&Arc<OscClient>, McpError> {
+        self.osc().await.map_err(McpError::from)
     }
 }
 
@@ -763,17 +797,20 @@ pub async fn query_session_summary(osc: &Arc<OscClient>) -> Result<SessionSummar
 }
 
 /// Build a JSON tool response with data + session summary.
-pub fn tool_response<T: Serialize>(data: &T, summary: &SessionSummary) -> Result<String, Error> {
-    let mut value = serde_json::to_value(data)?;
-    if let Some(obj) = value.as_object_mut() {
-        obj.insert("session_summary".to_string(), serde_json::to_value(summary)?);
-    }
-    Ok(serde_json::to_string_pretty(&value)?)
+/// For struct data (serializes to object), flattens summary into the object.
+/// For array data, wraps in `{key: [...], session_summary: {...}}`.
+pub fn tool_response_named<T: Serialize>(key: &str, data: &T, summary: &SessionSummary) -> Result<String, Error> {
+    let obj = serde_json::json!({
+        key: serde_json::to_value(data)?,
+        "session_summary": serde_json::to_value(summary)?,
+    });
+    Ok(serde_json::to_string_pretty(&obj)?)
 }
 
-/// Build a JSON tool response where data is the top-level object.
-pub fn tool_response_raw(data: serde_json::Value, summary: &SessionSummary) -> Result<String, Error> {
-    let mut value = data;
+/// Build a JSON tool response where data is already a JSON object.
+/// Inserts session_summary into the object.
+pub fn tool_response_obj(data: &impl Serialize, summary: &SessionSummary) -> Result<String, Error> {
+    let mut value = serde_json::to_value(data)?;
     if let Some(obj) = value.as_object_mut() {
         obj.insert("session_summary".to_string(), serde_json::to_value(summary)?);
     }
@@ -832,31 +869,57 @@ pub struct SetTempoParams {
     pub bpm: f32,
 }
 
+/// NOTE: Use `#[tool_router(router = tool_router_transport, vis = "pub(crate)")]` on this impl block.
+/// All tool logic should be in internal helper methods (not `#[tool]`-annotated) so
+/// the batch tool (Task 16) can call the same logic without going through MCP.
 impl AbletonMcpServer {
+    // --- Internal helpers (reusable from batch tool) ---
+
+    pub(crate) async fn do_play(&self) -> Result<(TransportState, common::SessionSummary), crate::errors::Error> {
+        let osc = self.osc().await?;
+        osc.send("/live/play", vec![]).await?;
+        let summary = common::query_session_summary(osc).await?;
+        let state = TransportState { is_playing: summary.is_playing, tempo: summary.tempo };
+        Ok((state, summary))
+    }
+
+    pub(crate) async fn do_stop(&self) -> Result<(TransportState, common::SessionSummary), crate::errors::Error> {
+        let osc = self.osc().await?;
+        osc.send("/live/stop", vec![]).await?;
+        let summary = common::query_session_summary(osc).await?;
+        let state = TransportState { is_playing: summary.is_playing, tempo: summary.tempo };
+        Ok((state, summary))
+    }
+
+    pub(crate) async fn do_set_tempo(&self, bpm: f32) -> Result<common::SessionSummary, crate::errors::Error> {
+        let osc = self.osc().await?;
+        osc.send("/live/song/set/tempo", vec![rosc::OscType::Float(bpm)]).await?;
+        common::query_session_summary(osc).await
+    }
+
+    // --- Tool handlers (thin wrappers) ---
+
     /// Start playback in Ableton Live.
     #[tool(description = "Start playback in Ableton Live")]
     pub async fn ableton_play(&self) -> Result<CallToolResult, McpError> {
-        self.osc().await.map_err(McpError::from)?.send("/live/play", vec![]).await.map_err(McpError::from)?;
-        let summary = common::query_session_summary(self.osc().await.map_err(McpError::from)?).await.map_err(McpError::from)?;
-        let state = TransportState { is_playing: summary.is_playing, tempo: summary.tempo };
-        let json = common::tool_response(&state, &summary).map_err(McpError::from)?;
+        let (state, summary) = self.do_play().await.map_err(McpError::from)?;
+        let json = common::tool_response_obj(&state, &summary).map_err(McpError::from)?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
     /// Stop playback in Ableton Live.
     #[tool(description = "Stop playback in Ableton Live")]
     pub async fn ableton_stop(&self) -> Result<CallToolResult, McpError> {
-        self.osc().await.map_err(McpError::from)?.send("/live/stop", vec![]).await.map_err(McpError::from)?;
-        let summary = common::query_session_summary(self.osc().await.map_err(McpError::from)?).await.map_err(McpError::from)?;
-        let state = TransportState { is_playing: summary.is_playing, tempo: summary.tempo };
-        let json = common::tool_response(&state, &summary).map_err(McpError::from)?;
+        let (state, summary) = self.do_stop().await.map_err(McpError::from)?;
+        let json = common::tool_response_obj(&state, &summary).map_err(McpError::from)?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
     /// Get the current tempo (BPM) of the Ableton session.
     #[tool(description = "Get the current tempo (BPM) of the Ableton session")]
     pub async fn ableton_get_tempo(&self) -> Result<CallToolResult, McpError> {
-        let summary = common::query_session_summary(self.osc().await.map_err(McpError::from)?).await.map_err(McpError::from)?;
+        let osc = self.osc_mcp().await?;
+        let summary = common::query_session_summary(osc).await.map_err(McpError::from)?;
         let json = serde_json::to_string_pretty(&summary).map_err(|e| McpError::from(crate::errors::Error::from(e)))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
@@ -864,9 +927,7 @@ impl AbletonMcpServer {
     /// Set the tempo (BPM) of the Ableton session. Value should be in BPM (e.g., 120.0).
     #[tool(description = "Set the tempo (BPM) of the Ableton session. Value should be in BPM (e.g., 120.0).")]
     pub async fn ableton_set_tempo(&self, Parameters(params): Parameters<SetTempoParams>) -> Result<CallToolResult, McpError> {
-        self.osc().await.map_err(McpError::from)?.send("/live/song/set/tempo", vec![rosc::OscType::Float(params.bpm)])
-            .await.map_err(McpError::from)?;
-        let summary = common::query_session_summary(self.osc().await.map_err(McpError::from)?).await.map_err(McpError::from)?;
+        let summary = self.do_set_tempo(params.bpm).await.map_err(McpError::from)?;
         let json = serde_json::to_string_pretty(&summary).map_err(|e| McpError::from(crate::errors::Error::from(e)))?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
@@ -1005,6 +1066,10 @@ git commit -m "Add scene tools (fire, list)"
 ```
 
 ---
+
+**IMPORTANT for Tasks 9-12:** Define all tool logic as internal `do_*` helper methods on `AbletonMcpServer` (same pattern as Task 8 transport tools). The `#[tool]`-annotated methods are thin wrappers. This is critical for Task 16 (batch tool) which needs to call the same logic without going through MCP.
+
+**Shared types:** `Note`, `ParameterValue`, `DeviceParamGroup` are used across `clips.rs`, `devices.rs`, and `clips.rs` (Phase 2). Define them in `src/tools/common.rs` and import where needed.
 
 ## Chunk 3: Clip + Device Tools
 
@@ -1279,7 +1344,7 @@ fn default_on_error() -> String { "continue".to_string() }
 
 Each action is a JSON object with an `"action"` field (short name like `"set_track_volume"`, `"mute_track"`, etc.) plus the action-specific fields.
 
-Implementation approach: match on the `action` string, deserialize the rest into the appropriate params struct, call the same OSC logic that the atomic tools use. Extract the shared logic from atomic tools into internal helper functions so both the tool and the batch dispatcher can call them.
+Implementation approach: match on the `action` string, deserialize the rest into the appropriate params struct, call the internal `do_*` helper methods defined on `AbletonMcpServer` (e.g., `do_play`, `do_set_track_volume`). These helpers were created in Tasks 8-12 specifically to be callable from both tool handlers and the batch dispatcher.
 
 Return: array of per-action results, plus a final session summary.
 
@@ -1353,9 +1418,49 @@ git commit -m "Add Phase 2 compound tools (create musical phrase, adjust clip so
 
 ---
 
-## Chunk 6: Final Verification
+## Chunk 6: Tests + Final Verification
 
-### Task 18: Full build, clippy, format check
+### Task 18: Unit tests
+
+**Files:**
+- Create: `tests/osc_test.rs` or inline `#[cfg(test)]` modules
+
+- [ ] **Step 1: Test `FromOsc` implementations**
+
+Test each `FromOsc` impl with:
+- Normal args: `[Float(120.0)]` → `f32::from_osc` → `120.0`
+- Prepended indices: `[Int(0), String("Bass")]` → `String::from_osc` → `"Bass"`
+- Bool from int: `[Int(1)]` → `bool::from_osc` → `true`
+- Empty args: all impls should return `UnexpectedResponse`
+- `extract_strings` with skip: `[Int(0), String("a"), String("b")]` skip 1 → `["a", "b"]`
+
+- [ ] **Step 2: Test `tool_response_named` and `tool_response_obj`**
+
+- `tool_response_named("tracks", &vec!["a"], &summary)` → JSON has `tracks` array + `session_summary`
+- `tool_response_obj(&struct_data, &summary)` → JSON has struct fields + `session_summary`
+
+- [ ] **Step 3: Test note flattening**
+
+Test the note-to-`OscType` conversion used by `add_notes`:
+- 1 note → 5 OscType values in correct order `[pitch, start, duration, velocity, mute]`
+- 1000 notes → accepted
+- 1001 notes → rejected with error
+
+- [ ] **Step 4: Test installer path resolution**
+
+Test `ableton_midi_effects_path()` returns a reasonable path on the current OS.
+
+- [ ] **Step 5: Run tests and commit**
+
+```bash
+cargo test
+git add tests/ src/
+git commit -m "Add unit tests for FromOsc, tool_response, note flattening, installer"
+```
+
+---
+
+### Task 19: Full build, clippy, format check
 
 **Files:** none (verification only)
 
@@ -1382,7 +1487,7 @@ git commit -m "Fix clippy warnings and formatting"
 
 ---
 
-### Task 19: Manual end-to-end test with Ableton
+### Task 20: Manual end-to-end test with Ableton
 
 **Files:** none (testing only)
 
