@@ -11,13 +11,13 @@ Claude/Client <-> MCP Server (Rust, stdio/HTTP) <-> OSC over UDP <-> AbletonOSC 
 ## Prerequisites
 
 - AbletonOSC Max for Live device installed and loaded in the user's Ableton session (auto-installed via `mcp-server-ableton install`)
-- AbletonOSC listens on UDP 11000 (receive) and replies on UDP 11001 (send)
+- AbletonOSC listens on UDP 11000 (receive) and replies to the sender's address
 - Max for Live requires Ableton Suite or the Max for Live add-on
 
 ## Design Decisions
 
 - **Stateless**: Every tool call queries OSC live. No caching or session mirroring.
-- **Lazy connection**: No startup probe. Timeout errors surface per-tool with a clear message.
+- **Lazy init via `OnceCell`**: OscClient is created on first tool call, not on server startup. MCP handshake succeeds even if Ableton isn't running. Timeout errors surface per-tool with a clear message.
 - **Flat dispatch**: Tools call `OscClient` directly — no intermediate domain layer.
 - **Raw MIDI values**: Notes expressed as `{pitch: i32, start: f32, duration: f32, velocity: i32, mute: i32}`. The `mute` field defaults to 0 if omitted. No musical abstraction layer.
 - **Read-after-write**: Every mutation returns the updated state of the affected entity.
@@ -28,7 +28,18 @@ Claude/Client <-> MCP Server (Rust, stdio/HTTP) <-> OSC over UDP <-> AbletonOSC 
 
 ### OscClient
 
-Struct holding a UDP send socket and a query mutex. A background tokio task owns the recv socket and dispatches replies.
+Struct holding a UDP socket, query mutex, pending map, and cancellation token. Created lazily on first use via `tokio::sync::OnceCell` in `AbletonMcpServer`.
+
+### Lazy Initialization
+
+`AbletonMcpServer` holds a `tokio::sync::OnceCell<Arc<OscClient>>`. On the first tool call, `OnceCell::get_or_init()` creates the `OscClient`, binds the socket, and spawns the recv task. This means:
+- MCP handshake (initialize → initialized) succeeds without Ableton running
+- The UDP socket is never opened if the user only calls `tools/list`
+- First actual tool call pays the ~1ms initialization cost
+
+### Ephemeral Recv Port
+
+The recv socket binds to `127.0.0.1:0` — the OS assigns a random available port. AbletonOSC replies to the sender's address (standard UDP behavior), so no configuration is needed. This allows multiple MCP server instances to run simultaneously without port conflicts.
 
 ### Dispatcher
 
@@ -49,6 +60,25 @@ This means compound tools like `get_session_state` issue sequential queries. For
 - **`send(address: &str, args: Vec<OscType>) -> Result<()>`** — Fire-and-forget. Encode with `rosc`, send UDP packet. Used for commands (play, stop, fire_clip). Does NOT acquire the query mutex.
 - **`query(address: &str, args: Vec<OscType>) -> Result<OscMessage>`** — Acquires the query mutex, inserts a oneshot into the dispatcher map, sends the UDP packet, awaits the receiver with `tokio::time::timeout` (1000ms). On timeout, cleans up the map entry and returns an error.
 
+### FromOsc Trait
+
+Type-safe response parsing for AbletonOSC's reply format. AbletonOSC prepends index arguments to responses (e.g., `/live/track/get/name` with args `[0]` returns `[0, "Bass"]` — the track index is echoed back before the actual value).
+
+```rust
+pub trait FromOsc: Sized {
+    fn from_osc(args: &[OscType]) -> Result<Self, Error>;
+}
+```
+
+Implementations:
+- `f32` / `f64` — scans for the last float in args, skipping prepended indices
+- `i32` — last int
+- `String` — last string
+- `bool` — last int-as-bool or bool
+- `Vec<T>` — for bulk responses (all strings, all floats, etc. after skipping known index prefix)
+
+Replaces ad-hoc `match msg.args.first()` scattered across tools with a single, tested trait.
+
 ### Error Messages
 
 Timeout error text: "AbletonOSC not responding — is the Max for Live device loaded in your Ableton session?"
@@ -56,11 +86,9 @@ Timeout error text: "AbletonOSC not responding — is the Max for Live device lo
 ### Hardcoded Config
 
 - Send: `127.0.0.1:11000`
-- Recv: `127.0.0.1:11001`
+- Recv: `127.0.0.1:0` (ephemeral — OS-assigned port)
 - Timeout: 1000ms
 - Recv buffer: 65535 bytes
-
-No configurability in MVP. AbletonOSC defaults are fixed.
 
 ## Error Handling (`errors.rs`)
 
@@ -213,6 +241,12 @@ Supersedes template tracks for device creation. The LLM could say "add a Wavetab
 
 Not in scope for implementation. Documented here for future planning.
 
+## Future: PyPI Distribution via maturin
+
+Use `maturin` with `bindings = "bin"` to publish the Rust binary to PyPI. This enables `pip install mcp-server-ableton` or `uvx mcp-server-ableton` — no Rust toolchain needed by the user. Pure Rust binary distributed via Python packaging infrastructure. Particularly useful for MCP servers since Claude Desktop config already expects commands like `uvx`.
+
+Not in MVP scope — binary releases via GitHub Actions are sufficient initially.
+
 ## AbletonOSC Installer (`installer.rs`)
 
 ### Bundling
@@ -250,7 +284,7 @@ AbletonOSC is included as a git submodule pinned to a specific commit of `ideofo
 src/
 ├── main.rs              # MCP stdio/HTTP server startup + install dispatch (existing, extend)
 ├── lib.rs               # Module exports (existing)
-├── server.rs            # AbletonMcpServer + Arc<OscClient> + tool router (existing, extend)
+├── server.rs            # AbletonMcpServer + OnceCell<OscClient> + tool router (existing, extend)
 ├── config.rs            # CLI args + Install subcommand (existing, extend)
 ├── errors.rs            # Error types (existing, add OSC + installer variants)
 ├── installer.rs         # AbletonOSC auto-installer (new)
