@@ -1,10 +1,13 @@
 use std::net::IpAddr;
 
-use clap::{Parser, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Parser, Debug)]
 #[command(name = "mcp-server-ableton", about = "MCP server for Ableton Live")]
 pub struct Cli {
+    #[command(subcommand)]
+    pub command: Option<Command>,
+
     /// Transport protocol
     #[arg(long, default_value = "stdio", env = "MCP_TRANSPORT")]
     pub transport: TransportArg,
@@ -16,6 +19,16 @@ pub struct Cli {
     /// Port for HTTP transport
     #[arg(long, default_value = "3000", env = "PORT")]
     pub port: u16,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Command {
+    /// Install AbletonOSC into Ableton's User Library
+    Install {
+        /// Overwrite existing installation
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Debug, Clone, ValueEnum)]
@@ -36,7 +49,7 @@ pub struct Config {
 impl Config {
     /// # Errors
     /// Returns an error if configuration is invalid.
-    pub fn from_cli(cli: Cli) -> Result<Self, crate::errors::Error> {
+    pub fn from_cli(cli: &Cli) -> Result<Self, crate::errors::Error> {
         let transport = match cli.transport {
             TransportArg::Stdio => Transport::Stdio,
             TransportArg::StreamableHttp => Transport::Http {

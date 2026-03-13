@@ -5,7 +5,7 @@ use rmcp::ServiceExt;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use tracing_subscriber::EnvFilter;
 
-use mcp_server_ableton::config::{Cli, Config, Transport};
+use mcp_server_ableton::config::{Cli, Command, Config, Transport};
 use mcp_server_ableton::server::AbletonMcpServer;
 
 #[tokio::main]
@@ -16,7 +16,14 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let cli = Cli::parse();
-    let config = Config::from_cli(cli)?;
+
+    // Handle subcommands before starting the server
+    if let Some(Command::Install { force }) = &cli.command {
+        mcp_server_ableton::installer::install(*force)?;
+        return Ok(());
+    }
+
+    let config = Config::from_cli(&cli)?;
     let config = Arc::new(config);
 
     let server = AbletonMcpServer::new(config.clone());
