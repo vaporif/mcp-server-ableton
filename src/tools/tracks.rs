@@ -8,6 +8,20 @@ use crate::server::AbletonMcpServer;
 use crate::tools::common::{self, SessionSummary};
 use crate::tools::devices::DeviceInfo;
 
+const TEMPLATE_PREFIX: &str = "[TPL] ";
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CreateFromTemplateParams {
+    /// Name of the template (without [TPL] prefix), e.g., "Pad", "Drums"
+    pub template_name: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TemplateInfo {
+    pub track_index: i32,
+    pub name: String,
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct TrackIndexParams {
     /// Track index (0-based)
@@ -310,5 +324,46 @@ impl AbletonMcpServer {
         let mixer = self.query_mixer_state(params.track).await?;
         let summary = common::query_session_summary(osc).await?;
         Ok((mixer, summary))
+    }
+
+    pub async fn do_list_templates(
+        &self,
+    ) -> Result<(Vec<TemplateInfo>, SessionSummary), Error> {
+        let (tracks, summary) = self.do_list_tracks().await?;
+        let templates = tracks
+            .into_iter()
+            .filter_map(|t| {
+                t.name.strip_prefix(TEMPLATE_PREFIX).map(|stripped| TemplateInfo {
+                    track_index: t.index,
+                    name: stripped.to_string(),
+                })
+            })
+            .collect();
+        Ok((templates, summary))
+    }
+
+    pub async fn do_create_from_template(
+        &self,
+        template_name: &str,
+    ) -> Result<(TrackInfo, SessionSummary), Error> {
+        let (tracks, _) = self.do_list_tracks().await?;
+        let full_name = format!("{TEMPLATE_PREFIX}{template_name}");
+        let template_track = tracks
+            .iter()
+            .find(|t| t.name == full_name)
+            .ok_or_else(|| {
+                Error::UnexpectedResponse(format!("template track '{full_name}' not found"))
+            })?;
+        let track_index = template_track.index;
+
+        let osc = self.osc().await?;
+        osc.send(
+            "/live/song/duplicate_track",
+            vec![OscType::Int(track_index)],
+        )
+        .await?;
+
+        let new_track_index = track_index + 1;
+        self.do_set_track_name(new_track_index, template_name).await
     }
 }

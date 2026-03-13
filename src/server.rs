@@ -10,15 +10,17 @@ use tokio_util::sync::CancellationToken;
 use crate::config::Config;
 use crate::errors::Error;
 use crate::osc::OscClient;
+use crate::tools::batch::BatchParams;
 use crate::tools::clips::{
-    AddNotesParams, ClearAndWriteNotesParams, ClipParams, CreateMidiClipParams,
-    CreateMidiClipWithNotesParams, GetNotesParams,
+    AddNotesParams, AdjustClipSoundParams, ClearAndWriteNotesParams, ClipParams,
+    CreateMidiClipParams, CreateMidiClipWithNotesParams, CreateMusicalPhraseParams, GetNotesParams,
 };
 use crate::tools::common;
 use crate::tools::devices::{DeviceParams, SetDeviceParameterParams, SetDeviceParametersParams};
 use crate::tools::scenes::SceneIndexParams;
 use crate::tools::tracks::{
-    SetMixerParams, SetTrackNameParams, SetTrackVolumeParams, TrackIndexParams,
+    CreateFromTemplateParams, SetMixerParams, SetTrackNameParams, SetTrackVolumeParams,
+    TrackIndexParams,
 };
 use crate::tools::transport::SetTempoParams;
 
@@ -160,6 +162,33 @@ impl AbletonMcpServer {
             .await
             .map_err(rmcp::ErrorData::from)?;
         let json = common::tool_response_obj(&mixer, &summary).map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    // -- Template tools --
+
+    #[tool(description = "List all template tracks (named with [TPL] prefix) in the session")]
+    pub async fn ableton_list_templates(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (templates, summary) = self
+            .do_list_templates()
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json = common::tool_response_named("templates", &templates, &summary)
+            .map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(description = "Create a new track from a template track (duplicates and renames)")]
+    pub async fn ableton_create_from_template(
+        &self,
+        Parameters(params): Parameters<CreateFromTemplateParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (track_info, summary) = self
+            .do_create_from_template(&params.template_name)
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json =
+            common::tool_response_obj(&track_info, &summary).map_err(rmcp::ErrorData::from)?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
@@ -328,6 +357,21 @@ impl AbletonMcpServer {
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
+    // -- Batch tool --
+
+    #[tool(
+        description = "Execute multiple actions in sequence. Supports: play, stop, set_tempo, set_track_volume, set_track_name, mute_track, unmute_track, fire_scene, fire_clip, stop_clip, create_midi_clip, add_notes, remove_notes, set_device_parameter, set_mixer"
+    )]
+    pub async fn ableton_batch(
+        &self,
+        Parameters(params): Parameters<BatchParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (results, summary) = self.do_batch(&params).await.map_err(rmcp::ErrorData::from)?;
+        let json =
+            common::tool_response_named("results", &results, &summary).map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
     // -- Compound read tools --
 
     #[tool(description = "Get full session state: tempo, tracks with mixer/devices, and scenes")]
@@ -413,6 +457,38 @@ impl AbletonMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let (response, summary) = self
             .do_set_device_parameters(params.track, params.device, &params.parameters)
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json =
+            common::tool_response_obj(&response, &summary).map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(
+        description = "Create a MIDI clip with notes and optionally set device parameters in one call"
+    )]
+    pub async fn ableton_create_musical_phrase(
+        &self,
+        Parameters(params): Parameters<CreateMusicalPhraseParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (response, summary) = self
+            .do_create_musical_phrase(&params)
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json =
+            common::tool_response_obj(&response, &summary).map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(
+        description = "Adjust a clip's notes and/or device parameters. Can add notes, clear and replace notes, and tweak device params."
+    )]
+    pub async fn ableton_adjust_clip_sound(
+        &self,
+        Parameters(params): Parameters<AdjustClipSoundParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (response, summary) = self
+            .do_adjust_clip_sound(&params)
             .await
             .map_err(rmcp::ErrorData::from)?;
         let json =
