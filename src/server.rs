@@ -11,6 +11,7 @@ use crate::config::Config;
 use crate::errors::Error;
 use crate::osc::OscClient;
 use crate::tools::common;
+use crate::tools::scenes::SceneIndexParams;
 use crate::tools::tracks::{SetTrackNameParams, SetTrackVolumeParams, TrackIndexParams};
 use crate::tools::transport::SetTempoParams;
 
@@ -152,6 +153,29 @@ impl AbletonMcpServer {
             .await
             .map_err(rmcp::ErrorData::from)?;
         let json = common::tool_response_obj(&mixer, &summary).map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    // -- Scene tools --
+
+    #[tool(description = "List all scenes in the Ableton Live session")]
+    pub async fn ableton_list_scenes(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (scenes, summary) = self.do_list_scenes().await.map_err(rmcp::ErrorData::from)?;
+        let json =
+            common::tool_response_named("scenes", &scenes, &summary).map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(description = "Fire (launch) a scene in Ableton Live")]
+    pub async fn ableton_fire_scene(
+        &self,
+        Parameters(params): Parameters<SceneIndexParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (state, summary) = self
+            .do_fire_scene(params.scene)
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json = common::tool_response_obj(&state, &summary).map_err(rmcp::ErrorData::from)?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 }
