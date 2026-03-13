@@ -10,7 +10,9 @@ use tokio_util::sync::CancellationToken;
 use crate::config::Config;
 use crate::errors::Error;
 use crate::osc::OscClient;
+use crate::tools::clips::{AddNotesParams, ClipParams, CreateMidiClipParams, GetNotesParams};
 use crate::tools::common;
+use crate::tools::devices::{DeviceParams, SetDeviceParameterParams};
 use crate::tools::scenes::SceneIndexParams;
 use crate::tools::tracks::{SetTrackNameParams, SetTrackVolumeParams, TrackIndexParams};
 use crate::tools::transport::SetTempoParams;
@@ -176,6 +178,148 @@ impl AbletonMcpServer {
             .await
             .map_err(rmcp::ErrorData::from)?;
         let json = common::tool_response_obj(&state, &summary).map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    // -- Clip tools --
+
+    #[tool(description = "Fire (launch) a clip in Ableton Live")]
+    pub async fn ableton_fire_clip(
+        &self,
+        Parameters(params): Parameters<ClipParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (state, summary) = self
+            .do_fire_clip(params.track, params.slot)
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json = common::tool_response_obj(&state, &summary).map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(description = "Stop a clip in Ableton Live")]
+    pub async fn ableton_stop_clip(
+        &self,
+        Parameters(params): Parameters<ClipParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let summary = self
+            .do_stop_clip(params.track, params.slot)
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json = serde_json::to_string_pretty(&summary)
+            .map_err(|e| rmcp::ErrorData::from(Error::from(e)))?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(description = "Get the name of a clip in Ableton Live")]
+    pub async fn ableton_get_clip_name(
+        &self,
+        Parameters(params): Parameters<ClipParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (info, summary) = self
+            .do_get_clip_name(params.track, params.slot)
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json = common::tool_response_obj(&info, &summary).map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(description = "Create a MIDI clip in Ableton Live")]
+    pub async fn ableton_create_midi_clip(
+        &self,
+        Parameters(params): Parameters<CreateMidiClipParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let summary = self
+            .do_create_midi_clip(params.track, params.slot, params.length)
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json = serde_json::to_string_pretty(&summary)
+            .map_err(|e| rmcp::ErrorData::from(Error::from(e)))?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(description = "Add notes to a MIDI clip in Ableton Live")]
+    pub async fn ableton_add_notes(
+        &self,
+        Parameters(params): Parameters<AddNotesParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (response, summary) = self
+            .do_add_notes(params.track, params.slot, &params.notes)
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json =
+            common::tool_response_obj(&response, &summary).map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(description = "Get all notes from a MIDI clip in Ableton Live")]
+    pub async fn ableton_get_notes(
+        &self,
+        Parameters(params): Parameters<GetNotesParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (response, summary) = self
+            .do_get_notes(params.track, params.slot)
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json =
+            common::tool_response_obj(&response, &summary).map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(description = "Remove all notes from a MIDI clip in Ableton Live")]
+    pub async fn ableton_remove_notes(
+        &self,
+        Parameters(params): Parameters<ClipParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let summary = self
+            .do_remove_notes(params.track, params.slot)
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json = serde_json::to_string_pretty(&summary)
+            .map_err(|e| rmcp::ErrorData::from(Error::from(e)))?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    // -- Device tools --
+
+    #[tool(description = "List all devices on a track in Ableton Live")]
+    pub async fn ableton_list_devices(
+        &self,
+        Parameters(params): Parameters<TrackIndexParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (response, summary) = self
+            .do_list_devices(params.track)
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json =
+            common::tool_response_obj(&response, &summary).map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(description = "List all parameters of a device in Ableton Live")]
+    pub async fn ableton_list_device_parameters(
+        &self,
+        Parameters(params): Parameters<DeviceParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (response, summary) = self
+            .do_list_device_parameters(params.track, params.device)
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json =
+            common::tool_response_obj(&response, &summary).map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(description = "Set a device parameter value in Ableton Live")]
+    pub async fn ableton_set_device_parameter(
+        &self,
+        Parameters(params): Parameters<SetDeviceParameterParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (response, summary) = self
+            .do_set_device_parameter(params.track, params.device, params.param, params.value)
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json =
+            common::tool_response_obj(&response, &summary).map_err(rmcp::ErrorData::from)?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 }
