@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::errors::Error;
 use crate::server::AbletonMcpServer;
 use crate::tools::common::{self, SessionSummary};
+use crate::tools::devices::ParameterValue;
 use crate::tools::transport::TransportState;
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -73,6 +74,43 @@ pub struct ClearAndWriteNotesParams {
     pub slot: i32,
     /// Notes to write after clearing. Max 1000.
     pub notes: Vec<Note>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct DeviceParamGroup {
+    /// Device index (0-based)
+    pub device: i32,
+    /// Parameters to set on this device
+    pub parameters: Vec<ParameterValue>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CreateMusicalPhraseParams {
+    /// Track index (0-based)
+    pub track: i32,
+    /// Clip slot index (0-based)
+    pub slot: i32,
+    /// Length in beats (e.g., 4.0 for one bar in 4/4)
+    pub length: f32,
+    /// Notes to add to the clip
+    pub notes: Vec<Note>,
+    /// Optional device parameter tweaks to apply after creating the clip
+    pub device_params: Option<Vec<DeviceParamGroup>>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct AdjustClipSoundParams {
+    /// Track index (0-based)
+    pub track: i32,
+    /// Clip slot index (0-based)
+    pub slot: i32,
+    /// New notes to add. Omit to leave notes unchanged.
+    pub notes: Option<Vec<Note>>,
+    /// Clear existing notes before adding new ones. Default false.
+    #[serde(default)]
+    pub clear_existing_notes: bool,
+    /// Device parameter tweaks. Omit to leave devices unchanged.
+    pub device_params: Option<Vec<DeviceParamGroup>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -313,5 +351,46 @@ impl AbletonMcpServer {
         self.do_remove_notes(track, slot).await?;
         self.do_add_notes(track, slot, notes).await?;
         self.do_get_notes(track, slot).await
+    }
+
+    pub async fn do_create_musical_phrase(
+        &self,
+        params: &CreateMusicalPhraseParams,
+    ) -> Result<(NotesResponse, SessionSummary), Error> {
+        let (response, _) = self
+            .do_create_midi_clip_with_notes(params.track, params.slot, params.length, &params.notes)
+            .await?;
+
+        if let Some(ref device_groups) = params.device_params {
+            for group in device_groups {
+                self.do_set_device_parameters(params.track, group.device, &group.parameters)
+                    .await?;
+            }
+        }
+
+        let osc = self.osc().await?;
+        let summary = common::query_session_summary(osc).await?;
+        Ok((response, summary))
+    }
+
+    pub async fn do_adjust_clip_sound(
+        &self,
+        params: &AdjustClipSoundParams,
+    ) -> Result<(NotesResponse, SessionSummary), Error> {
+        if let Some(ref notes) = params.notes {
+            if params.clear_existing_notes {
+                self.do_remove_notes(params.track, params.slot).await?;
+            }
+            self.do_add_notes(params.track, params.slot, notes).await?;
+        }
+
+        if let Some(ref device_groups) = params.device_params {
+            for group in device_groups {
+                self.do_set_device_parameters(params.track, group.device, &group.parameters)
+                    .await?;
+            }
+        }
+
+        self.do_get_notes(params.track, params.slot).await
     }
 }
