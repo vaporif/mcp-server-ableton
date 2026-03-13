@@ -11,6 +11,7 @@ use crate::config::Config;
 use crate::errors::Error;
 use crate::osc::OscClient;
 use crate::tools::common;
+use crate::tools::tracks::{SetTrackNameParams, SetTrackVolumeParams, TrackIndexParams};
 use crate::tools::transport::SetTempoParams;
 
 #[derive(Clone)]
@@ -88,6 +89,69 @@ impl AbletonMcpServer {
             .map_err(rmcp::ErrorData::from)?;
         let json = serde_json::to_string_pretty(&summary)
             .map_err(|e| rmcp::ErrorData::from(Error::from(e)))?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    // -- Track tools --
+
+    #[tool(description = "List all tracks in the Ableton Live session")]
+    pub async fn ableton_list_tracks(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (tracks, summary) = self.do_list_tracks().await.map_err(rmcp::ErrorData::from)?;
+        let json =
+            common::tool_response_named("tracks", &tracks, &summary).map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(description = "Set a track's volume in Ableton Live")]
+    pub async fn ableton_set_track_volume(
+        &self,
+        Parameters(params): Parameters<SetTrackVolumeParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (mixer, summary) = self
+            .do_set_track_volume(params.track, params.volume)
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json = common::tool_response_obj(&mixer, &summary).map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(description = "Set a track's name in Ableton Live")]
+    pub async fn ableton_set_track_name(
+        &self,
+        Parameters(params): Parameters<SetTrackNameParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (track_info, summary) = self
+            .do_set_track_name(params.track, &params.name)
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json =
+            common::tool_response_obj(&track_info, &summary).map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(description = "Mute a track in Ableton Live")]
+    pub async fn ableton_mute_track(
+        &self,
+        Parameters(params): Parameters<TrackIndexParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (mixer, summary) = self
+            .do_mute_track(params.track)
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json = common::tool_response_obj(&mixer, &summary).map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(description = "Unmute a track in Ableton Live")]
+    pub async fn ableton_unmute_track(
+        &self,
+        Parameters(params): Parameters<TrackIndexParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (mixer, summary) = self
+            .do_unmute_track(params.track)
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json = common::tool_response_obj(&mixer, &summary).map_err(rmcp::ErrorData::from)?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 }
