@@ -1,3 +1,4 @@
+pub mod batch;
 pub mod clips;
 pub mod common;
 pub mod devices;
