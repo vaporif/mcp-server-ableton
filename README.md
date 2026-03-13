@@ -89,7 +89,6 @@ Every tool response includes a `session_summary` with current tempo, playback st
 ## Credits
 
 - [AbletonOSC](https://github.com/ideoforms/AbletonOSC) by Daniel Jones - Max for Live device providing OSC control of Ableton Live
-- [rmcp](https://github.com/anthropics/rmcp) - Rust MCP SDK
 
 ## License
 
