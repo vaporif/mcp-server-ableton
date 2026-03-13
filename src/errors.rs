@@ -8,6 +8,21 @@ pub enum Error {
 
     #[error("config: {0}")]
     Config(String),
+
+    #[error("OSC timeout: AbletonOSC not responding — is the Max for Live device loaded in your Ableton session?")]
+    OscTimeout,
+
+    #[error("OSC decode error: {0}")]
+    OscDecode(String),
+
+    #[error("unexpected OSC response: {0}")]
+    UnexpectedResponse(String),
+
+    #[error("installer error: {0}")]
+    Installer(String),
+
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 impl From<Error> for McpError {
