@@ -53,6 +53,28 @@ pub struct GetNotesParams {
     pub slot: i32,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CreateMidiClipWithNotesParams {
+    /// Track index (0-based)
+    pub track: i32,
+    /// Clip slot index (0-based)
+    pub slot: i32,
+    /// Length in beats (e.g., 4.0 for one bar in 4/4)
+    pub length: f32,
+    /// Notes to add. Max 1000.
+    pub notes: Vec<Note>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ClearAndWriteNotesParams {
+    /// Track index (0-based)
+    pub track: i32,
+    /// Clip slot index (0-based)
+    pub slot: i32,
+    /// Notes to write after clearing. Max 1000.
+    pub notes: Vec<Note>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ClipNameInfo {
     pub track: i32,
@@ -250,5 +272,46 @@ impl AbletonMcpServer {
         )
         .await?;
         common::query_session_summary(osc).await
+    }
+
+    pub async fn do_create_midi_clip_with_notes(
+        &self,
+        track: i32,
+        slot: i32,
+        length: f32,
+        notes: &[Note],
+    ) -> Result<(NotesResponse, SessionSummary), Error> {
+        if notes.len() > 1000 {
+            return Err(Error::UnexpectedResponse(
+                "max 1000 notes per call".into(),
+            ));
+        }
+
+        self.do_create_midi_clip(track, slot, length).await?;
+        let (response, summary) = self.do_add_notes(track, slot, notes).await?;
+        let result = NotesResponse {
+            track,
+            slot,
+            note_count: notes.len(),
+            notes: response.notes,
+        };
+        Ok((result, summary))
+    }
+
+    pub async fn do_clear_and_write_notes(
+        &self,
+        track: i32,
+        slot: i32,
+        notes: &[Note],
+    ) -> Result<(NotesResponse, SessionSummary), Error> {
+        if notes.len() > 1000 {
+            return Err(Error::UnexpectedResponse(
+                "max 1000 notes per call".into(),
+            ));
+        }
+
+        self.do_remove_notes(track, slot).await?;
+        self.do_add_notes(track, slot, notes).await?;
+        self.do_get_notes(track, slot).await
     }
 }
