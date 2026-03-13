@@ -1,0 +1,12 @@
+[test-groups.integration]
+max-threads = 1
+
+[[profile.default.overrides]]
+filter = "binary(integration_test)"
+test-group = "integration"
+
+[profile.ci]
+
+[[profile.ci.overrides]]
+filter = "binary(integration_test)"
+test-group = "integration"
