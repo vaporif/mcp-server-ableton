@@ -10,11 +10,16 @@ use tokio_util::sync::CancellationToken;
 use crate::config::Config;
 use crate::errors::Error;
 use crate::osc::OscClient;
-use crate::tools::clips::{AddNotesParams, ClipParams, CreateMidiClipParams, GetNotesParams};
+use crate::tools::clips::{
+    AddNotesParams, ClearAndWriteNotesParams, ClipParams, CreateMidiClipParams,
+    CreateMidiClipWithNotesParams, GetNotesParams,
+};
 use crate::tools::common;
-use crate::tools::devices::{DeviceParams, SetDeviceParameterParams};
+use crate::tools::devices::{DeviceParams, SetDeviceParameterParams, SetDeviceParametersParams};
 use crate::tools::scenes::SceneIndexParams;
-use crate::tools::tracks::{SetTrackNameParams, SetTrackVolumeParams, TrackIndexParams};
+use crate::tools::tracks::{
+    SetMixerParams, SetTrackNameParams, SetTrackVolumeParams, TrackIndexParams,
+};
 use crate::tools::transport::SetTempoParams;
 
 #[derive(Clone)]
@@ -320,6 +325,111 @@ impl AbletonMcpServer {
             .map_err(rmcp::ErrorData::from)?;
         let json =
             common::tool_response_obj(&response, &summary).map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    // -- Compound read tools --
+
+    #[tool(description = "Get full session state: tempo, tracks with mixer/devices, and scenes")]
+    pub async fn ableton_get_session_state(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let state = self
+            .do_get_session_state()
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json = serde_json::to_string_pretty(&state)
+            .map_err(|e| rmcp::ErrorData::from(Error::from(e)))?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(description = "Get detailed info for a single track: mixer, devices, and clip slots")]
+    pub async fn ableton_get_track_detail(
+        &self,
+        Parameters(params): Parameters<TrackIndexParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (detail, summary) = self
+            .do_get_track_detail(params.track)
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json =
+            common::tool_response_obj(&detail, &summary).map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(description = "Get full device info including all parameters")]
+    pub async fn ableton_get_device_full(
+        &self,
+        Parameters(params): Parameters<DeviceParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (full, summary) = self
+            .do_get_device_full(params.track, params.device)
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json =
+            common::tool_response_obj(&full, &summary).map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    // -- Compound write tools --
+
+    #[tool(
+        description = "Create a MIDI clip and add notes in one call"
+    )]
+    pub async fn ableton_create_midi_clip_with_notes(
+        &self,
+        Parameters(params): Parameters<CreateMidiClipWithNotesParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (response, summary) = self
+            .do_create_midi_clip_with_notes(
+                params.track,
+                params.slot,
+                params.length,
+                &params.notes,
+            )
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json =
+            common::tool_response_obj(&response, &summary).map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(description = "Clear all notes in a clip and write new notes")]
+    pub async fn ableton_clear_and_write_notes(
+        &self,
+        Parameters(params): Parameters<ClearAndWriteNotesParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (response, summary) = self
+            .do_clear_and_write_notes(params.track, params.slot, &params.notes)
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json =
+            common::tool_response_obj(&response, &summary).map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(description = "Set multiple device parameters in one call")]
+    pub async fn ableton_set_device_parameters(
+        &self,
+        Parameters(params): Parameters<SetDeviceParametersParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (response, summary) = self
+            .do_set_device_parameters(params.track, params.device, &params.parameters)
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json =
+            common::tool_response_obj(&response, &summary).map_err(rmcp::ErrorData::from)?;
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(description = "Set mixer properties (volume, pan, mute, solo) for a track")]
+    pub async fn ableton_set_mixer(
+        &self,
+        Parameters(params): Parameters<SetMixerParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let (mixer, summary) = self
+            .do_set_mixer(&params)
+            .await
+            .map_err(rmcp::ErrorData::from)?;
+        let json = common::tool_response_obj(&mixer, &summary).map_err(rmcp::ErrorData::from)?;
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 }

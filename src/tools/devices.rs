@@ -44,6 +44,33 @@ pub struct ParameterInfo {
 }
 
 #[derive(Debug, Serialize)]
+pub struct DeviceFull {
+    pub track: i32,
+    pub device: i32,
+    pub name: String,
+    pub class_name: String,
+    pub parameters: Vec<ParameterInfo>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SetDeviceParametersParams {
+    /// Track index (0-based)
+    pub track: i32,
+    /// Device index (0-based)
+    pub device: i32,
+    /// Array of parameter index/value pairs to set
+    pub parameters: Vec<ParameterValue>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ParameterValue {
+    /// Parameter index (0-based)
+    pub index: i32,
+    /// Parameter value
+    pub value: f32,
+}
+
+#[derive(Debug, Serialize)]
 pub struct DeviceListResponse {
     pub track: i32,
     pub device_count: usize,
@@ -101,7 +128,7 @@ impl AbletonMcpServer {
         Ok((response, summary))
     }
 
-    async fn query_device_parameters(
+    pub(crate) async fn query_device_parameters(
         &self,
         track: i32,
         device: i32,
@@ -177,6 +204,83 @@ impl AbletonMcpServer {
             ],
         )
         .await?;
+
+        let params = self.query_device_parameters(track, device).await?;
+        let summary = common::query_session_summary(osc).await?;
+        let response = ParameterListResponse {
+            track,
+            device,
+            parameter_count: params.len(),
+            parameters: params,
+        };
+        Ok((response, summary))
+    }
+
+    pub async fn do_get_device_full(
+        &self,
+        track: i32,
+        device: i32,
+    ) -> Result<(DeviceFull, SessionSummary), Error> {
+        let osc = self.osc().await?;
+
+        let names_msg = osc
+            .query(
+                "/live/track/get/devices/name",
+                vec![OscType::Int(track)],
+            )
+            .await?;
+        let class_msg = osc
+            .query(
+                "/live/track/get/devices/class_name",
+                vec![OscType::Int(track)],
+            )
+            .await?;
+
+        let names = extract_strings(&names_msg.args, 1);
+        let class_names = extract_strings(&class_msg.args, 1);
+
+        let name = names
+            .get(device as usize)
+            .cloned()
+            .unwrap_or_default();
+        let class_name = class_names
+            .get(device as usize)
+            .cloned()
+            .unwrap_or_default();
+
+        let parameters = self.query_device_parameters(track, device).await?;
+        let summary = common::query_session_summary(osc).await?;
+
+        let full = DeviceFull {
+            track,
+            device,
+            name,
+            class_name,
+            parameters,
+        };
+        Ok((full, summary))
+    }
+
+    pub async fn do_set_device_parameters(
+        &self,
+        track: i32,
+        device: i32,
+        parameters: &[ParameterValue],
+    ) -> Result<(ParameterListResponse, SessionSummary), Error> {
+        let osc = self.osc().await?;
+
+        for pv in parameters {
+            osc.send(
+                "/live/device/set/parameter/value",
+                vec![
+                    OscType::Int(track),
+                    OscType::Int(device),
+                    OscType::Int(pv.index),
+                    OscType::Float(pv.value),
+                ],
+            )
+            .await?;
+        }
 
         let params = self.query_device_parameters(track, device).await?;
         let summary = common::query_session_summary(osc).await?;
