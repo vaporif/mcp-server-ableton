@@ -3,6 +3,7 @@ use std::sync::Arc;
 use clap::Parser;
 use rmcp::ServiceExt;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
 use mcp_server_ableton::config::{Cli, Command, Config, Transport};
@@ -10,35 +11,34 @@ use mcp_server_ableton::server::AbletonMcpServer;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .with_writer(std::io::stderr)
-        .init();
-
     let cli = Cli::parse();
 
-    // Handle subcommands before starting the server
     if let Some(Command::Install { force }) = &cli.command {
         mcp_server_ableton::installer::install(*force)?;
         return Ok(());
     }
 
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .with_writer(std::io::stderr)
+        .init();
+
     let config = Config::from_cli(&cli)?;
     let config = Arc::new(config);
 
-    let server = AbletonMcpServer::new(config.clone());
+    let ct = CancellationToken::new();
+    let server = AbletonMcpServer::new(config.clone(), ct.clone());
 
     match &config.transport {
         Transport::Stdio => {
             tracing::info!("starting stdio transport");
             let service = server.serve(rmcp::transport::stdio()).await?;
             service.waiting().await?;
+            ct.cancel();
         }
         Transport::Http { host, port } => {
             let addr = std::net::SocketAddr::new(*host, *port);
             tracing::info!("starting HTTP transport on {addr}");
-
-            let ct = tokio_util::sync::CancellationToken::new();
 
             let session_manager: Arc<LocalSessionManager> = Arc::default();
             let service = rmcp::transport::StreamableHttpService::new(
@@ -64,7 +64,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn shutdown_signal(ct: tokio_util::sync::CancellationToken) {
+async fn shutdown_signal(ct: CancellationToken) {
     let ctrl_c = async {
         tokio::signal::ctrl_c()
             .await
