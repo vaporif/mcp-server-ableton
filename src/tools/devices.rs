@@ -231,11 +231,16 @@ impl AbletonMcpServer {
         let names = extract_strings(&names_msg.args, 1);
         let class_names = extract_strings(&class_msg.args, 1);
 
-        let name = names.get(device as usize).cloned().unwrap_or_default();
-        let class_name = class_names
-            .get(device as usize)
-            .cloned()
-            .unwrap_or_default();
+        let device_idx = usize::try_from(device).map_err(|_| {
+            Error::InvalidInput(format!("device index must be non-negative, got {device}"))
+        })?;
+        let name = names.get(device_idx).cloned().ok_or_else(|| {
+            Error::InvalidInput(format!(
+                "device index {device} out of range (0..{})",
+                names.len()
+            ))
+        })?;
+        let class_name = class_names.get(device_idx).cloned().unwrap_or_default();
 
         let parameters = self.query_device_parameters(track, device).await?;
         let summary = common::query_session_summary(osc).await?;

@@ -21,12 +21,12 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let ct = CancellationToken::new();
-    let server = AbletonMcpServer::new(ct.clone());
+    let _guard = ct.clone().drop_guard();
+    let server = AbletonMcpServer::new(ct);
 
     tracing::info!("starting stdio transport");
     let service = server.serve(rmcp::transport::stdio()).await?;
     service.waiting().await?;
-    ct.cancel();
 
     Ok(())
 }

@@ -347,15 +347,17 @@ impl AbletonMcpServer {
         )
         .await?;
 
-        // Re-query tracks to find the duplicate (Ableton inserts it at track_index + 1,
-        // but verify by searching for the duplicated name to avoid renaming the wrong track).
         let (updated_tracks, _) = self.do_list_tracks().await?;
         let new_track_index = updated_tracks
             .iter()
             .filter(|t| t.index > track_index && t.name == full_name)
             .map(|t| t.index)
             .next()
-            .unwrap_or(track_index + 1);
+            .ok_or_else(|| {
+                Error::UnexpectedResponse(format!(
+                    "could not find duplicated track after duplicating '{full_name}'"
+                ))
+            })?;
         self.do_set_track_name(new_track_index, template_name).await
     }
 }

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use rmcp::model::{CallToolResult, Content};
 use serde::Serialize;
 
 use crate::errors::Error;
@@ -26,7 +27,7 @@ pub async fn query_session_summary(osc: &Arc<OscClient>) -> Result<SessionSummar
     })
 }
 
-pub fn tool_response_named<T: Serialize>(
+fn tool_response_named<T: Serialize>(
     key: &str,
     data: &T,
     summary: &SessionSummary,
@@ -38,7 +39,7 @@ pub fn tool_response_named<T: Serialize>(
     Ok(serde_json::to_string_pretty(&obj)?)
 }
 
-pub fn tool_response_obj(data: &impl Serialize, summary: &SessionSummary) -> Result<String, Error> {
+fn tool_response_obj(data: &impl Serialize, summary: &SessionSummary) -> Result<String, Error> {
     let mut value = serde_json::to_value(data)?;
     let obj = value.as_object_mut().ok_or_else(|| {
         Error::UnexpectedResponse(
@@ -50,6 +51,28 @@ pub fn tool_response_obj(data: &impl Serialize, summary: &SessionSummary) -> Res
         serde_json::to_value(summary)?,
     );
     Ok(serde_json::to_string_pretty(&value)?)
+}
+
+pub fn call_result_obj(
+    data: &impl Serialize,
+    summary: &SessionSummary,
+) -> Result<CallToolResult, rmcp::ErrorData> {
+    let json = tool_response_obj(data, summary)?;
+    Ok(CallToolResult::success(vec![Content::text(json)]))
+}
+
+pub fn call_result_named(
+    key: &str,
+    data: &impl Serialize,
+    summary: &SessionSummary,
+) -> Result<CallToolResult, rmcp::ErrorData> {
+    let json = tool_response_named(key, data, summary)?;
+    Ok(CallToolResult::success(vec![Content::text(json)]))
+}
+
+pub fn call_result_json(data: &impl Serialize) -> Result<CallToolResult, rmcp::ErrorData> {
+    let json = serde_json::to_string_pretty(data).map_err(Error::from)?;
+    Ok(CallToolResult::success(vec![Content::text(json)]))
 }
 
 #[cfg(test)]

@@ -7,18 +7,22 @@ use crate::tools::clips::Note;
 use crate::tools::common::{self, SessionSummary};
 use crate::tools::tracks::SetMixerParams;
 
+#[derive(Debug, Deserialize, JsonSchema, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OnError {
+    #[default]
+    Continue,
+    Abort,
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct BatchParams {
     /// Array of actions to execute sequentially. Each action is a JSON object
     /// with an "action" field plus action-specific fields.
     pub actions: Vec<serde_json::Value>,
     /// Error handling: "continue" (default) executes all actions, "abort" stops on first error
-    #[serde(default = "default_on_error")]
-    pub on_error: String,
-}
-
-fn default_on_error() -> String {
-    "continue".to_string()
+    #[serde(default)]
+    pub on_error: OnError,
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,7 +85,7 @@ impl AbletonMcpServer {
         &self,
         params: &BatchParams,
     ) -> Result<(Vec<serde_json::Value>, SessionSummary), Error> {
-        let abort_on_error = params.on_error == "abort";
+        let abort_on_error = params.on_error == OnError::Abort;
         let mut results = Vec::with_capacity(params.actions.len());
 
         for action_value in &params.actions {
@@ -181,7 +185,7 @@ impl AbletonMcpServer {
                 self.do_set_mixer(&a).await?;
             }
             unknown => {
-                return Err(Error::UnexpectedResponse(format!(
+                return Err(Error::InvalidInput(format!(
                     "unknown batch action: {unknown}"
                 )));
             }

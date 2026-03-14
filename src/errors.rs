@@ -20,6 +20,9 @@ pub enum Error {
     #[error("unexpected OSC response: {0}")]
     UnexpectedResponse(String),
 
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
+
     #[error("installer error: {0}")]
     Installer(String),
 
@@ -30,7 +33,11 @@ pub enum Error {
 impl From<Error> for McpError {
     fn from(err: Error) -> Self {
         let message = err.to_string();
-        tracing::error!("{message}");
+        if matches!(err, Error::InvalidInput(_)) {
+            tracing::warn!("{message}");
+        } else {
+            tracing::error!("{message}");
+        }
         Self::internal_error(message, None)
     }
 }

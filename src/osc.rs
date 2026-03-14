@@ -132,7 +132,7 @@ impl OscClient {
         let client = Arc::new(Self {
             socket,
             send_addr,
-            pending: Arc::clone(&pending),
+            pending,
             query_mutex: Mutex::new(()),
         });
 
@@ -209,11 +209,18 @@ impl OscClient {
             return Err(e);
         }
 
-        if let Ok(Ok(msg)) = tokio::time::timeout(QUERY_TIMEOUT, rx).await {
-            Ok(msg)
-        } else {
-            self.pending.lock().await.remove(address);
-            Err(Error::OscTimeout)
+        match tokio::time::timeout(QUERY_TIMEOUT, rx).await {
+            Ok(Ok(msg)) => Ok(msg),
+            Ok(Err(_)) => {
+                self.pending.lock().await.remove(address);
+                Err(Error::OscDecode(
+                    "OSC listener task stopped unexpectedly".into(),
+                ))
+            }
+            Err(_) => {
+                self.pending.lock().await.remove(address);
+                Err(Error::OscTimeout)
+            }
         }
     }
 

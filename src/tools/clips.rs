@@ -23,7 +23,7 @@ pub struct Note {
     pub duration: f32,
     pub velocity: i32,
     #[serde(default)]
-    pub mute: i32,
+    pub mute: bool,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -200,7 +200,7 @@ impl AbletonMcpServer {
         notes: &[Note],
     ) -> Result<(NotesResponse, SessionSummary), Error> {
         if notes.len() > 1000 {
-            return Err(Error::UnexpectedResponse("max 1000 notes per call".into()));
+            return Err(Error::InvalidInput("max 1000 notes per call".into()));
         }
 
         let mut args: Vec<OscType> = Vec::with_capacity(2 + notes.len() * 5);
@@ -211,7 +211,7 @@ impl AbletonMcpServer {
             args.push(OscType::Float(note.start));
             args.push(OscType::Float(note.duration));
             args.push(OscType::Int(note.velocity));
-            args.push(OscType::Int(note.mute));
+            args.push(OscType::Int(i32::from(note.mute)));
         }
 
         let osc = self.osc().await?;
@@ -257,7 +257,7 @@ impl AbletonMcpServer {
                 let OscType::Int(velocity) = chunk[3] else {
                     continue;
                 };
-                let OscType::Int(mute) = chunk[4] else {
+                let OscType::Int(mute_int) = chunk[4] else {
                     continue;
                 };
                 notes.push(Note {
@@ -265,7 +265,7 @@ impl AbletonMcpServer {
                     start,
                     duration,
                     velocity,
-                    mute,
+                    mute: mute_int != 0,
                 });
             }
         }
@@ -305,7 +305,7 @@ impl AbletonMcpServer {
         notes: &[Note],
     ) -> Result<(NotesResponse, SessionSummary), Error> {
         if notes.len() > 1000 {
-            return Err(Error::UnexpectedResponse("max 1000 notes per call".into()));
+            return Err(Error::InvalidInput("max 1000 notes per call".into()));
         }
 
         self.do_create_midi_clip(track, slot, length).await?;
@@ -326,7 +326,7 @@ impl AbletonMcpServer {
         notes: &[Note],
     ) -> Result<(NotesResponse, SessionSummary), Error> {
         if notes.len() > 1000 {
-            return Err(Error::UnexpectedResponse("max 1000 notes per call".into()));
+            return Err(Error::InvalidInput("max 1000 notes per call".into()));
         }
 
         self.do_remove_notes(track, slot).await?;
@@ -387,7 +387,7 @@ mod tests {
             start: 0.0,
             duration: 1.0,
             velocity: 100,
-            mute: 0,
+            mute: false,
         };
         let json = serde_json::to_string(&note).unwrap();
         let parsed: Note = serde_json::from_str(&json).unwrap();
@@ -395,14 +395,14 @@ mod tests {
         assert!((parsed.start).abs() < f32::EPSILON);
         assert!((parsed.duration - 1.0).abs() < f32::EPSILON);
         assert_eq!(parsed.velocity, 100);
-        assert_eq!(parsed.mute, 0);
+        assert!(!parsed.mute);
     }
 
     #[test]
     fn note_default_mute_is_zero() {
         let json = r#"{"pitch":60,"start":0.0,"duration":1.0,"velocity":100}"#;
         let note: Note = serde_json::from_str(json).unwrap();
-        assert_eq!(note.mute, 0);
+        assert!(!note.mute);
     }
 
     #[test]
@@ -413,7 +413,7 @@ mod tests {
                 start: 0.0,
                 duration: 0.25,
                 velocity: 100,
-                mute: 0,
+                mute: false,
             })
             .collect();
         assert!(notes.len() > 1000);
@@ -427,7 +427,7 @@ mod tests {
                 start: 0.0,
                 duration: 0.25,
                 velocity: 100,
-                mute: 0,
+                mute: false,
             })
             .collect();
         assert_eq!(notes.len(), 1000);

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, Content, Implementation, ServerCapabilities, ServerInfo};
+use rmcp::model::{CallToolResult, Implementation, ServerCapabilities, ServerInfo};
 use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
@@ -60,15 +60,13 @@ impl AbletonMcpServer {
     #[tool(description = "Start playback in Ableton Live")]
     pub async fn ableton_play(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         let (state, summary) = self.do_play().await.map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_obj(&state, &summary).map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_obj(&state, &summary)
     }
 
     #[tool(description = "Stop playback in Ableton Live")]
     pub async fn ableton_stop(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         let (state, summary) = self.do_stop().await.map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_obj(&state, &summary).map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_obj(&state, &summary)
     }
 
     #[tool(description = "Get current session info (tempo, playing state, selected track)")]
@@ -77,9 +75,7 @@ impl AbletonMcpServer {
         let summary = common::query_session_summary(osc)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = serde_json::to_string_pretty(&summary)
-            .map_err(|e| rmcp::ErrorData::from(Error::from(e)))?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_json(&summary)
     }
 
     #[tool(description = "Set the tempo in Ableton Live")]
@@ -91,9 +87,7 @@ impl AbletonMcpServer {
             .do_set_tempo(params.bpm)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = serde_json::to_string_pretty(&summary)
-            .map_err(|e| rmcp::ErrorData::from(Error::from(e)))?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_json(&summary)
     }
 
     // -- Track tools --
@@ -101,9 +95,7 @@ impl AbletonMcpServer {
     #[tool(description = "List all tracks in the Ableton Live session")]
     pub async fn ableton_list_tracks(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         let (tracks, summary) = self.do_list_tracks().await.map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_named("tracks", &tracks, &summary)
-            .map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_named("tracks", &tracks, &summary)
     }
 
     #[tool(description = "Set a track's volume in Ableton Live")]
@@ -115,8 +107,7 @@ impl AbletonMcpServer {
             .do_set_track_volume(params.track, params.volume)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_obj(&mixer, &summary).map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_obj(&mixer, &summary)
     }
 
     #[tool(description = "Set a track's name in Ableton Live")]
@@ -128,9 +119,7 @@ impl AbletonMcpServer {
             .do_set_track_name(params.track, &params.name)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json =
-            common::tool_response_obj(&track_info, &summary).map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_obj(&track_info, &summary)
     }
 
     #[tool(description = "Mute a track in Ableton Live")]
@@ -142,8 +131,7 @@ impl AbletonMcpServer {
             .do_mute_track(params.track)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_obj(&mixer, &summary).map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_obj(&mixer, &summary)
     }
 
     #[tool(description = "Unmute a track in Ableton Live")]
@@ -155,8 +143,7 @@ impl AbletonMcpServer {
             .do_unmute_track(params.track)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_obj(&mixer, &summary).map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_obj(&mixer, &summary)
     }
 
     // -- Template tools --
@@ -167,9 +154,7 @@ impl AbletonMcpServer {
             .do_list_templates()
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_named("templates", &templates, &summary)
-            .map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_named("templates", &templates, &summary)
     }
 
     #[tool(description = "Create a new track from a template track (duplicates and renames)")]
@@ -181,9 +166,7 @@ impl AbletonMcpServer {
             .do_create_from_template(&params.template_name)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json =
-            common::tool_response_obj(&track_info, &summary).map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_obj(&track_info, &summary)
     }
 
     // -- Scene tools --
@@ -191,9 +174,7 @@ impl AbletonMcpServer {
     #[tool(description = "List all scenes in the Ableton Live session")]
     pub async fn ableton_list_scenes(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         let (scenes, summary) = self.do_list_scenes().await.map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_named("scenes", &scenes, &summary)
-            .map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_named("scenes", &scenes, &summary)
     }
 
     #[tool(description = "Fire (launch) a scene in Ableton Live")]
@@ -205,8 +186,7 @@ impl AbletonMcpServer {
             .do_fire_scene(params.scene)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_obj(&state, &summary).map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_obj(&state, &summary)
     }
 
     // -- Clip tools --
@@ -220,8 +200,7 @@ impl AbletonMcpServer {
             .do_fire_clip(params.track, params.slot)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_obj(&state, &summary).map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_obj(&state, &summary)
     }
 
     #[tool(description = "Stop a clip in Ableton Live")]
@@ -233,9 +212,7 @@ impl AbletonMcpServer {
             .do_stop_clip(params.track, params.slot)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = serde_json::to_string_pretty(&summary)
-            .map_err(|e| rmcp::ErrorData::from(Error::from(e)))?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_json(&summary)
     }
 
     #[tool(description = "Get the name of a clip in Ableton Live")]
@@ -247,8 +224,7 @@ impl AbletonMcpServer {
             .do_get_clip_name(params.track, params.slot)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_obj(&info, &summary).map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_obj(&info, &summary)
     }
 
     #[tool(description = "Create a MIDI clip in Ableton Live")]
@@ -260,9 +236,7 @@ impl AbletonMcpServer {
             .do_create_midi_clip(params.track, params.slot, params.length)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = serde_json::to_string_pretty(&summary)
-            .map_err(|e| rmcp::ErrorData::from(Error::from(e)))?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_json(&summary)
     }
 
     #[tool(description = "Add notes to a MIDI clip in Ableton Live")]
@@ -274,8 +248,7 @@ impl AbletonMcpServer {
             .do_add_notes(params.track, params.slot, &params.notes)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_obj(&response, &summary).map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_obj(&response, &summary)
     }
 
     #[tool(description = "Get all notes from a MIDI clip in Ableton Live")]
@@ -287,8 +260,7 @@ impl AbletonMcpServer {
             .do_get_notes(params.track, params.slot)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_obj(&response, &summary).map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_obj(&response, &summary)
     }
 
     #[tool(description = "Remove all notes from a MIDI clip in Ableton Live")]
@@ -300,9 +272,7 @@ impl AbletonMcpServer {
             .do_remove_notes(params.track, params.slot)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = serde_json::to_string_pretty(&summary)
-            .map_err(|e| rmcp::ErrorData::from(Error::from(e)))?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_json(&summary)
     }
 
     // -- Device tools --
@@ -316,8 +286,7 @@ impl AbletonMcpServer {
             .do_list_devices(params.track)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_obj(&response, &summary).map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_obj(&response, &summary)
     }
 
     #[tool(description = "List all parameters of a device in Ableton Live")]
@@ -329,8 +298,7 @@ impl AbletonMcpServer {
             .do_list_device_parameters(params.track, params.device)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_obj(&response, &summary).map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_obj(&response, &summary)
     }
 
     #[tool(description = "Set a device parameter value in Ableton Live")]
@@ -342,8 +310,7 @@ impl AbletonMcpServer {
             .do_set_device_parameter(params.track, params.device, params.param, params.value)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_obj(&response, &summary).map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_obj(&response, &summary)
     }
 
     // -- Batch tool --
@@ -359,9 +326,7 @@ impl AbletonMcpServer {
             .do_batch(&params)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_named("results", &results, &summary)
-            .map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_named("results", &results, &summary)
     }
 
     // -- Compound read tools --
@@ -372,9 +337,7 @@ impl AbletonMcpServer {
             .do_get_session_state()
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = serde_json::to_string_pretty(&state)
-            .map_err(|e| rmcp::ErrorData::from(Error::from(e)))?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_json(&state)
     }
 
     #[tool(description = "Get detailed info for a single track: mixer, devices, and clip slots")]
@@ -386,8 +349,7 @@ impl AbletonMcpServer {
             .do_get_track_detail(params.track)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_obj(&detail, &summary).map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_obj(&detail, &summary)
     }
 
     #[tool(description = "Get full device info including all parameters")]
@@ -399,8 +361,7 @@ impl AbletonMcpServer {
             .do_get_device_full(params.track, params.device)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_obj(&full, &summary).map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_obj(&full, &summary)
     }
 
     // -- Compound write tools --
@@ -414,8 +375,7 @@ impl AbletonMcpServer {
             .do_create_midi_clip_with_notes(params.track, params.slot, params.length, &params.notes)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_obj(&response, &summary).map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_obj(&response, &summary)
     }
 
     #[tool(description = "Clear all notes in a clip and write new notes")]
@@ -427,8 +387,7 @@ impl AbletonMcpServer {
             .do_clear_and_write_notes(params.track, params.slot, &params.notes)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_obj(&response, &summary).map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_obj(&response, &summary)
     }
 
     #[tool(description = "Set multiple device parameters in one call")]
@@ -440,8 +399,7 @@ impl AbletonMcpServer {
             .do_set_device_parameters(params.track, params.device, &params.parameters)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_obj(&response, &summary).map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_obj(&response, &summary)
     }
 
     #[tool(
@@ -455,8 +413,7 @@ impl AbletonMcpServer {
             .do_create_musical_phrase(&params)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_obj(&response, &summary).map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_obj(&response, &summary)
     }
 
     #[tool(
@@ -470,8 +427,7 @@ impl AbletonMcpServer {
             .do_adjust_clip_sound(&params)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_obj(&response, &summary).map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_obj(&response, &summary)
     }
 
     #[tool(description = "Set mixer properties (volume, pan, mute, solo) for a track")]
@@ -483,8 +439,7 @@ impl AbletonMcpServer {
             .do_set_mixer(&params)
             .await
             .map_err(rmcp::ErrorData::from)?;
-        let json = common::tool_response_obj(&mixer, &summary).map_err(rmcp::ErrorData::from)?;
-        Ok(CallToolResult::success(vec![Content::text(json)]))
+        common::call_result_obj(&mixer, &summary)
     }
 }
 
