@@ -6,16 +6,9 @@
 
 ```mermaid
 graph LR
-    Agent[AI Agent] -->|MCP| Server[mcp-server-ableton]
+    Agent[AI Agent] -->|MCP JSON-RPC over stdio| Server[mcp-server-ableton]
     Server -->|UDP :11000| OSC[AbletonOSC]
     OSC -->|Max for Live| Ableton[Ableton Live]
-
-    subgraph Transport
-        Stdio
-        HTTP[Streamable HTTP]
-    end
-
-    Agent --> Transport --> Server
 ```
 
 ```mermaid
@@ -40,11 +33,58 @@ The server communicates with Ableton Live through [AbletonOSC](https://github.co
 
 - Ableton Live with [AbletonOSC](https://github.com/ideoforms/AbletonOSC) loaded as a Max for Live device
 
-## Install
+## Usage
+
+### Claude Desktop / Claude Code
+
+With uvx:
+
+```json
+{
+  "mcpServers": {
+    "ableton": {
+      "command": "uvx",
+      "args": ["mcp-server-ableton"]
+    }
+  }
+}
+```
+
+With rvx:
+
+```json
+{
+  "mcpServers": {
+    "ableton": {
+      "command": "rvx",
+      "args": ["mcp-server-ableton"]
+    }
+  }
+}
+```
+
+<details>
+<summary>Other installation methods</summary>
+
+**Nix:**
+
+```bash
+nix run github:vaporif/mcp-server-ableton
+```
+
+**Cargo:**
 
 ```bash
 cargo install --git https://github.com/vaporif/mcp-server-ableton
 ```
+
+**GitHub Releases:**
+
+Download prebuilt binaries from [Releases](https://github.com/vaporif/mcp-server-ableton/releases).
+
+</details>
+
+### AbletonOSC Setup
 
 Install the bundled AbletonOSC device into your Ableton User Library:
 
@@ -53,20 +93,6 @@ mcp-server-ableton install
 ```
 
 Then drag AbletonOSC from your User Library onto any track in Ableton.
-
-## Usage
-
-### Stdio (default)
-
-```bash
-mcp-server-ableton
-```
-
-### Streamable HTTP
-
-```bash
-mcp-server-ableton --transport streamable-http --host 127.0.0.1 --port 3000
-```
 
 ## Tools
 
@@ -85,6 +111,20 @@ Tools are designed for bulk operations — compound tools combine multiple actio
 | Session | full session state snapshot (tracks, scenes, mixer, devices) |
 
 Every tool response includes a `session_summary` with current tempo, playback state, and selected track for context.
+
+## Debugging
+
+```bash
+RUST_LOG=debug mcp-server-ableton
+```
+
+## Development
+
+```bash
+nix develop
+just setup-hooks
+just check
+```
 
 ## Credits
 

@@ -1,12 +1,9 @@
-use std::sync::Arc;
-
 use clap::Parser;
 use rmcp::ServiceExt;
-use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
-use mcp_server_ableton::config::{Cli, Command, Config, Transport};
+use mcp_server_ableton::config::{Cli, Command};
 use mcp_server_ableton::server::AbletonMcpServer;
 
 #[tokio::main]
@@ -23,59 +20,13 @@ async fn main() -> anyhow::Result<()> {
         .with_writer(std::io::stderr)
         .init();
 
-    let config = Config::from_cli(&cli)?;
-    let config = Arc::new(config);
-
     let ct = CancellationToken::new();
-    let server = AbletonMcpServer::new(config.clone(), ct.clone());
+    let server = AbletonMcpServer::new(ct.clone());
 
-    match &config.transport {
-        Transport::Stdio => {
-            tracing::info!("starting stdio transport");
-            let service = server.serve(rmcp::transport::stdio()).await?;
-            service.waiting().await?;
-            ct.cancel();
-        }
-        Transport::Http { host, port } => {
-            let addr = std::net::SocketAddr::new(*host, *port);
-            tracing::info!("starting HTTP transport on {addr}");
-
-            let session_manager: Arc<LocalSessionManager> = Arc::default();
-            let service = rmcp::transport::StreamableHttpService::new(
-                move || Ok(server.clone()),
-                session_manager,
-                rmcp::transport::StreamableHttpServerConfig {
-                    stateful_mode: true,
-                    cancellation_token: ct.child_token(),
-                    ..Default::default()
-                },
-            );
-
-            let router = axum::Router::new().nest_service("/mcp", service);
-            let listener = tokio::net::TcpListener::bind(addr).await?;
-
-            tracing::info!("listening on {addr}");
-            axum::serve(listener, router)
-                .with_graceful_shutdown(shutdown_signal(ct))
-                .await?;
-        }
-    }
+    tracing::info!("starting stdio transport");
+    let service = server.serve(rmcp::transport::stdio()).await?;
+    service.waiting().await?;
+    ct.cancel();
 
     Ok(())
-}
-
-async fn shutdown_signal(ct: CancellationToken) {
-    let ctrl_c = async {
-        if let Err(e) = tokio::signal::ctrl_c().await {
-            tracing::warn!("failed to install Ctrl+C handler: {e}");
-        }
-    };
-
-    tokio::select! {
-        () = ctrl_c => {},
-        () = ct.cancelled() => {},
-    }
-
-    tracing::info!("shutting down");
-    ct.cancel();
 }

@@ -25,7 +25,7 @@ env:
 jobs:
   check:
     name: Check
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
         with:
@@ -45,6 +45,12 @@ jobs:
 
       - name: Format
         run: cargo fmt --all -- --check
+
+      - name: Maturin build
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release
 
   cross:
     name: Cross ${{ matrix.target }}
@@ -81,7 +87,7 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
         with:
@@ -106,7 +112,7 @@ jobs:
 
   nix:
     name: Nix
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
         with:
@@ -124,7 +130,7 @@ jobs:
 
   audit:
     name: Audit
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
 

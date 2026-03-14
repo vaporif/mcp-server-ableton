@@ -17,7 +17,7 @@
     crane,
     ...
   }: let
-    systems = ["x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin"];
+    systems = ["x86_64-darwin" "aarch64-darwin"];
     forAllSystems = f:
       nixpkgs.lib.genAttrs systems (system:
         f {
@@ -48,7 +48,7 @@
           pkgs.cmake
           pkgs.pkg-config
         ];
-        buildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [
+        buildInputs = [
           pkgs.libiconv
           pkgs.apple-sdk_15
         ];
@@ -78,18 +78,18 @@
       ];
     in {
       default = pkgs.mkShell {
-        packages =
-          [
-            toolchain
-            pkgs.just
-            pkgs.taplo
-            pkgs.typos
-            pkgs.actionlint
-            pkgs.cargo-nextest
-          ]
-          ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
-            pkgs.apple-sdk_15
-          ];
+        packages = [
+          toolchain
+          pkgs.just
+          pkgs.taplo
+          pkgs.typos
+          pkgs.actionlint
+          pkgs.cargo-nextest
+          pkgs.cargo-deny
+          pkgs.maturin
+          pkgs.uv
+          pkgs.apple-sdk_15
+        ];
 
         env = {
           RUST_BACKTRACE = "1";

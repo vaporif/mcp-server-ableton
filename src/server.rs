@@ -7,7 +7,6 @@ use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
 
-use crate::config::Config;
 use crate::errors::Error;
 use crate::osc::OscClient;
 use crate::tools::batch::BatchParams;
@@ -26,8 +25,6 @@ use crate::tools::transport::SetTempoParams;
 
 #[derive(Clone)]
 pub struct AbletonMcpServer {
-    #[allow(dead_code)]
-    config: Arc<Config>,
     osc_cell: Arc<OnceCell<Arc<OscClient>>>,
     cancel: CancellationToken,
     tool_router: ToolRouter<Self>,
@@ -35,10 +32,9 @@ pub struct AbletonMcpServer {
 
 impl AbletonMcpServer {
     #[must_use]
-    pub fn new(config: Arc<Config>, cancel: CancellationToken) -> Self {
+    pub fn new(cancel: CancellationToken) -> Self {
         let tool_router = Self::tool_router();
         Self {
-            config,
             osc_cell: Arc::new(OnceCell::new()),
             cancel,
             tool_router,
