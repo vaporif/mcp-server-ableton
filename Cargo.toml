@@ -17,7 +17,7 @@ cargo = { level = "warn", priority = -1 }
 multiple_crate_versions = "allow"
 
 [dependencies]
-rmcp = { version = "1.1", features = ["server", "transport-io"] }
+rmcp = { version = "1.4", features = ["server", "transport-io"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "time"] }
 thiserror = "2"
 anyhow = "1"
